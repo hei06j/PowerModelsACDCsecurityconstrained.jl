@@ -6,9 +6,103 @@ violated contingencies in integrated ACDC grid.
 
 function run_scopf(data, model_constructor, solver; kwargs...)
     # _PMACDC.process_additional_data!(data)
-    return _PM.solve_model(data, model_constructor, solver, build_scopf; ref_extensions = [_PM.ref_add_on_off_va_bounds!, _PMACDC.add_ref_dcgrid!, _PMSC.ref_c1!], multinetwork=true, kwargs...)
+    return _PM.solve_model(data, model_constructor, solver, build_scopf; ref_extensions = [_PM.ref_add_on_off_va_bounds!, _PMACDC.add_ref_dcgrid!, _PMACDC.ref_add_pst!, _PMACDC.ref_add_sssc!,_PMSC.ref_c1!], multinetwork=true, kwargs...)
 end
 
+
+# no data, so no further templating is needed, constraint goes directly to the formulations
+function constraint_power_balance_ac(pm::_PM.AbstractPowerModel, i::Int; nw::Int=_PM.nw_id_default)
+    bus = _PM.ref(pm, nw, :bus, i)
+    bus_arcs = _PM.ref(pm, nw, :bus_arcs, i)
+    bus_arcs_pst = _PM.ref(pm, nw, :bus_arcs_pst, i)
+    bus_arcs_sssc = _PM.ref(pm, nw, :bus_arcs_sssc, i)
+    bus_arcs_sw = _PM.ref(pm, nw, :bus_arcs_sw, i)
+    bus_gens = _PM.ref(pm, nw, :bus_gens, i)
+    bus_loads = _PM.ref(pm, nw, :bus_loads, i)
+    bus_shunts = _PM.ref(pm, nw, :bus_shunts, i)
+    bus_storage = _PM.ref(pm, nw, :bus_storage, i)
+    bus_convs_ac = _PM.ref(pm, nw, :bus_convs_ac, i)
+
+    bus_pd = Dict(k => _PM.ref(pm, nw, :load, k, "pd") for k in bus_loads)
+    bus_qd = Dict(k => _PM.ref(pm, nw, :load, k, "qd") for k in bus_loads)
+
+    bus_gs = Dict(k => _PM.ref(pm, nw, :shunt, k, "gs") for k in bus_shunts)
+    bus_bs = Dict(k => _PM.ref(pm, nw, :shunt, k, "bs") for k in bus_shunts)
+
+    constraint_power_balance_ac(pm, nw, i, bus_arcs, bus_arcs_pst, bus_arcs_sssc, bus_convs_ac, bus_arcs_sw, bus_gens, bus_storage, bus_loads, bus_gs, bus_bs)
+end
+
+function constraint_power_balance_ac(pm::_PM.AbstractACPModel, n::Int, i::Int, bus_arcs, bus_arcs_pst, bus_arcs_sssc, bus_convs_ac, bus_arcs_sw, bus_gens, bus_storage, bus_loads, bus_gs, bus_bs)
+    vm   = _PM.var(pm, n, :vm, i)
+    p    = _PM.var(pm, n, :p)
+    q    = _PM.var(pm, n, :q)
+    # ppst    = _PM.var(pm, n,    :ppst)
+    # qpst    = _PM.var(pm, n,    :qpst)
+    pg   = _PM.var(pm, n,   :pg)
+    qg   = _PM.var(pm, n,   :qg)
+    pconv_grid_ac = _PM.var(pm, n,  :pconv_tf_fr)
+    qconv_grid_ac = _PM.var(pm, n,  :qconv_tf_fr)
+    # pflex = _PM.var(pm, n, :pflex)
+    # qflex = _PM.var(pm, n, :qflex)
+    # ps    = _PM.var(pm, n, :ps)
+    # qs    = _PM.var(pm, n, :qs)
+    # psssc    = _PM.var(pm, n,    :psssc)
+    # qsssc    = _PM.var(pm, n,    :qsssc)
+
+
+    cstr_p = JuMP.@constraint(pm.model,
+        sum(p[a] for a in bus_arcs)
+        # + sum(ppst[a] for a in bus_arcs_pst)
+        # + sum(psssc[a] for a in bus_arcs_sssc) 
+        + sum(pconv_grid_ac[c] for c in bus_convs_ac)
+        ==
+        sum(pg[g] for g in bus_gens)
+        # - sum(ps[s] for s in bus_storage)
+        # - sum(pflex[d] for d in bus_loads)
+        - sum(gs for (i,gs) in bus_gs)*vm^2
+    )
+    cstr_q = JuMP.@constraint(pm.model,
+        sum(q[a] for a in bus_arcs)
+        # + sum(qpst[a] for a in bus_arcs_pst)
+        # + sum(qsssc[a] for a in bus_arcs_sssc) 
+        + sum(qconv_grid_ac[c] for c in bus_convs_ac)
+        ==
+        sum(qg[g] for g in bus_gens)
+        # - sum(qs[s] for s in bus_storage)
+        # - sum(qflex[d] for d in bus_loads)
+        + sum(bs for (i,bs) in bus_bs)*vm^2
+    )
+
+    if _IM.report_duals(pm)
+        _PM.sol(pm, n, :bus, i)[:lam_kcl_r] = cstr_p
+        _PM.sol(pm, n, :bus, i)[:lam_kcl_i] = cstr_q
+    end
+end
+
+function constraint_power_balance_dc(pm::_PM.AbstractPowerModel, i::Int; nw::Int=_PM.nw_id_default)
+    bus_arcs_dcgrid = _PM.ref(pm, nw, :bus_arcs_dcgrid, i)
+    bus_convs_dc = _PM.ref(pm, nw, :bus_convs_dc, i)
+    bus_gens_dc = [] #_PM.ref(pm, nw, :bus_gens_dc, i)
+    pd = _PM.ref(pm, nw, :busdc, i)["Pdc"]
+    constraint_power_balance_dc(pm, nw, i, bus_arcs_dcgrid, bus_convs_dc, bus_gens_dc, pd)
+end
+
+function constraint_power_balance_dc(pm::_PM.AbstractPowerModel, n::Int, i::Int, bus_arcs_dcgrid, bus_convs_dc, bus_gens_dc, pd)
+    p_dcgrid = _PM.var(pm, n, :p_dcgrid)
+    pconv_dc = _PM.var(pm, n, :pconv_dc)
+    # pgdc = _PM.var(pm, n, :pgdc)
+
+    cstr_p = JuMP.@constraint(pm.model, 
+            sum(p_dcgrid[a] for a in bus_arcs_dcgrid) + 
+            sum(pconv_dc[c] for c in bus_convs_dc) 
+            == (-pd) 
+            # + sum(pgdc[g] for g in bus_gens_dc)
+            )
+
+    if _IM.report_duals(pm)
+        _PM.sol(pm, n, :busdc, i)[:lam_kcl_r] = cstr_p
+    end
+end
 
 function build_scopf(pm::_PM.AbstractPowerModel)
     
@@ -25,14 +119,15 @@ function build_scopf(pm::_PM.AbstractPowerModel)
     _PMACDC.variable_dc_converter(pm, nw=0)
     _PMACDC.variable_dcgrid_voltage_magnitude(pm, nw=0)
     _PMACDC.constraint_voltage_dc(pm, nw=0)
-
-   
+    
+    
     for i in _PM.ids(pm, nw=0, :ref_buses)
         _PM.constraint_theta_ref(pm, i, nw=0)
     end
 
     for i in _PM.ids(pm, nw=0, :bus)
-        _PMACDC.constraint_power_balance_ac(pm, i, nw=0)
+        # _PMACDC.constraint_power_balance_ac(pm, i, nw=0)
+        constraint_power_balance_ac(pm, i, nw=0)
     end
 
     for i in _PM.ids(pm, nw=0, :branch)
@@ -44,7 +139,8 @@ function build_scopf(pm::_PM.AbstractPowerModel)
     end
 
     for i in _PM.ids(pm, nw=0, :busdc)                          
-        _PMACDC.constraint_power_balance_dc(pm, i, nw=0)
+        # _PMACDC.constraint_power_balance_dc(pm, i, nw=0)
+        constraint_power_balance_dc(pm, i, nw=0)
     end
 
     for i in _PM.ids(pm, nw=0, :branchdc)
@@ -53,16 +149,16 @@ function build_scopf(pm::_PM.AbstractPowerModel)
 
     for i in _PM.ids(pm, nw=0, :convdc)
         _PMACDC.constraint_converter_losses(pm, i, nw=0)
-        _PMACDC.constraint_converter_current(pm, i, nw=0)
-        _PMACDC.constraint_conv_transformer(pm, i, nw=0)
+        # _PMACDC.constraint_converter_current(pm, i, nw=0)
+        # _PMACDC.constraint_conv_transformer(pm, i, nw=0)
         _PMACDC.constraint_conv_reactor(pm, i, nw=0)
         _PMACDC.constraint_conv_filter(pm, i, nw=0)
         if pm.ref[:it][:pm][:nw][_PM.nw_id_default][:convdc][i]["islcc"] == 1
             _PMACDC.constraint_conv_firing_angle(pm, i, nw=0)
         end
         constraint_pvdc_droop_control_linear(pm, i, nw=0)
-    end                                                                             
-
+    end
+    
     contigency_ids = [id for id in _PM.nw_ids(pm) if id != 0]
     
     for nw in contigency_ids

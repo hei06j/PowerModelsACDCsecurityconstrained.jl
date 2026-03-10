@@ -6,7 +6,7 @@ violated contingencies in integrated ACDC grid.
 
 function run_scopf(data, model_constructor, solver; kwargs...)
     # _PMACDC.process_additional_data!(data)
-    return _PM.solve_model(data, model_constructor, solver, build_scopf; ref_extensions = [_PM.ref_add_on_off_va_bounds!, _PMACDC.add_ref_dcgrid!,_PMSC.ref_c1!], multinetwork=true, kwargs...)
+    return _PM.solve_model(data, model_constructor, solver, build_scopf; ref_extensions = [_PM.ref_add_on_off_va_bounds!, _PMACDC.add_ref_dcgrid!, _PMACDC.ref_add_pst!, _PMACDC.ref_add_sssc!,_PMSC.ref_c1!], multinetwork=true, kwargs...)
 end
 
 

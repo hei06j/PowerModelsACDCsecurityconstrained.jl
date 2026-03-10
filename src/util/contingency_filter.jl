@@ -37,8 +37,14 @@ function check_acdc_contingency_violations(network, model_type, optimizer, setti
 
     gen_contingencies = _PMSC.calc_c1_gen_contingency_subset(network_lal, gen_eval_limit=gen_eval_limit)
     branch_contingencies = _PMSC.calc_c1_branch_contingency_subset(network_lal, branch_eval_limit=branch_eval_limit)
-    branchdc_contingencies = calc_branchdc_contingency_subset(network_lal, branchdc_eval_limit=branchdc_eval_limit)   
-    convdc_contingencies = calc_convdc_contingency_subset(network_lal, convdc_eval_limit=convdc_eval_limit)
+    branchdc_contingencies = []
+    if haskey(network_lal, "branchdc")
+        branchdc_contingencies = calc_branchdc_contingency_subset(network_lal, branchdc_eval_limit=branchdc_eval_limit)   
+    end
+    convdc_contingencies = []
+    if haskey(network_lal, "convdc")
+        convdc_contingencies = calc_convdc_contingency_subset(network_lal, convdc_eval_limit=convdc_eval_limit)
+    end
 
    total_cuts_pre_filter = []
     gen_cuts = []
@@ -166,82 +172,86 @@ function check_acdc_contingency_violations(network, model_type, optimizer, setti
    
     branchdc_cuts = []       
     branchdc_cut_vio = 0.0
-    for (i,cont) in enumerate(branchdc_contingencies)        
-        if length(branchdc_cuts) >= branchdc_contingency_limit       
-            Memento.info(_LOGGER, "hit branchdc flow cut limit $(branchdc_contingency_limit)")                
-            break
+    if !isempty(branchdc_contingencies)
+        for (i,cont) in enumerate(branchdc_contingencies)        
+            if length(branchdc_cuts) >= branchdc_contingency_limit       
+                Memento.info(_LOGGER, "hit branchdc flow cut limit $(branchdc_contingency_limit)")                
+                break
+            end
+            if length(gen_cuts) + length(branch_cuts) + length(branchdc_cuts) >= contingency_limit      
+                Memento.info(_LOGGER, "hit total cut limit $(contingency_limit)")                  
+                break
+            end
+
+            #Memento.info(_LOGGER, "working on ($(i)/$(branchdc_eval_limit)/$(branchdc_cont_total)): $(cont.label)")
+
+            cont_branchdc = network_lal["branchdc"]["$(cont.idx)"]           
+            cont_branchdc["status"] = 0                                       
+
+            try
+                solution = _PMACDC.run_acdcpf(network_lal, model_type, optimizer; setting = setting)["solution"]
+                _PM.update_data!(network_lal, solution)
+            catch exception
+                Memento.warn(_LOGGER, "acdcpf solve failed on $(cont.label)")     
+                continue
+            end
+
+            vio = calc_violations(network_lal, network_lal)         
+            
+            #Memento.info(_LOGGER, "$(cont.label) violations $(vio)")
+            #if vio.vm > vm_threshold || vio.pg > pg_threshold || vio.qg > qg_threshold || vio.sm > sm_threshold || vio.smdc > sm_threshold
+            if vio.smdc > sm_threshold || vio.sm > sm_threshold
+                Memento.info(_LOGGER, "adding contingency $(cont.label) due to constraint violations $(vio)")         
+                push!(branchdc_cuts, cont)
+                branchdc_cut_vio = vio.pg + vio.qg + vio.sm + vio.smdc
+            else
+                branchdc_cut_vio = 0.0
+            end
+
+            cont_branchdc["status"] = 1
         end
-        if length(gen_cuts) + length(branch_cuts) + length(branchdc_cuts) >= contingency_limit      
-            Memento.info(_LOGGER, "hit total cut limit $(contingency_limit)")                  
-            break
-        end
-
-        #Memento.info(_LOGGER, "working on ($(i)/$(branchdc_eval_limit)/$(branchdc_cont_total)): $(cont.label)")
-
-        cont_branchdc = network_lal["branchdc"]["$(cont.idx)"]           
-        cont_branchdc["status"] = 0                                       
-
-        try
-            solution = _PMACDC.run_acdcpf(network_lal, model_type, optimizer; setting = setting)["solution"]
-            _PM.update_data!(network_lal, solution)
-        catch exception
-            Memento.warn(_LOGGER, "acdcpf solve failed on $(cont.label)")     
-            continue
-        end
-
-        vio = calc_violations(network_lal, network_lal)         
-        
-        #Memento.info(_LOGGER, "$(cont.label) violations $(vio)")
-        #if vio.vm > vm_threshold || vio.pg > pg_threshold || vio.qg > qg_threshold || vio.sm > sm_threshold || vio.smdc > sm_threshold
-        if vio.smdc > sm_threshold || vio.sm > sm_threshold
-            Memento.info(_LOGGER, "adding contingency $(cont.label) due to constraint violations $(vio)")         
-            push!(branchdc_cuts, cont)
-            branchdc_cut_vio = vio.pg + vio.qg + vio.sm + vio.smdc
-        else
-            branchdc_cut_vio = 0.0
-        end
-
-        cont_branchdc["status"] = 1
     end
 
     convdc_cuts = []  
     convdc_cut_vio = 0.0
-    for (i,cont) in enumerate(convdc_contingencies)        
-        if length(convdc_cuts) >= convdc_contingency_limit       
-            Memento.info(_LOGGER, "hit convdc cut limit $(convdc_contingency_limit)")               
-            break
+    if !isempty(convdc_contingencies)
+        for (i,cont) in enumerate(convdc_contingencies)        
+            if length(convdc_cuts) >= convdc_contingency_limit       
+                Memento.info(_LOGGER, "hit convdc cut limit $(convdc_contingency_limit)")               
+                break
+            end
+            if length(gen_cuts) + length(branch_cuts) + length(branchdc_cuts) + length(convdc_cuts) >= contingency_limit       
+                Memento.info(_LOGGER, "hit total cut limit $(contingency_limit)")                 
+                break
+            end
+
+            #Memento.info(_LOGGER, "working on ($(i)/$(convdc_eval_limit)/$(convdc_cont_total)): $(cont.label)")
+
+            cont_convdc = network_lal["convdc"]["$(cont.idx)"]            
+            cont_convdc["status"] = 0                                       
+
+            try
+                solution = _PMACDC.run_acdcpf( network_lal, model_type, optimizer; setting = setting)["solution"]
+                _PM.update_data!(network_lal, solution)
+            catch exception
+                Memento.warn(_LOGGER, "acdcpf solve failed on $(cont.label)")     
+                continue
+            end
+
+            vio = calc_violations(network_lal, network_lal)          
+        
+            #info(_LOGGER, "$(cont.label) violations $(vio)")
+            #if vio.vm > vm_threshold || vio.pg > pg_threshold || vio.qg > qg_threshold || vio.sm > sm_threshold || vio.smdc > sm_threshold || vio.cmac > sm_threshold || vio.cmdc > sm_threshold
+            if vio.sm > sm_threshold || vio.smdc > sm_threshold 
+                Memento.info(_LOGGER, "adding contingency $(cont.label) due to constraint violations $(vio)")            
+                push!(convdc_cuts, cont)
+                convdc_cut_vio = vio.pg + vio.qg + vio.sm + vio.smdc + vio.cmac + vio.cmdc
+            else
+                convdc_cut_vio = 0.0
+            end
+
+            cont_convdc["status"] = 1
         end
-        if length(gen_cuts) + length(branch_cuts) + length(branchdc_cuts) + length(convdc_cuts) >= contingency_limit       
-            Memento.info(_LOGGER, "hit total cut limit $(contingency_limit)")                 
-            break
-        end
-
-        #Memento.info(_LOGGER, "working on ($(i)/$(convdc_eval_limit)/$(convdc_cont_total)): $(cont.label)")
-
-        cont_convdc = network_lal["convdc"]["$(cont.idx)"]            
-        cont_convdc["status"] = 0                                       
-
-        try
-            solution = _PMACDC.run_acdcpf( network_lal, model_type, optimizer; setting = setting)["solution"]
-            _PM.update_data!(network_lal, solution)
-        catch exception
-            Memento.warn(_LOGGER, "acdcpf solve failed on $(cont.label)")     
-            continue
-        end
-
-        vio = calc_violations(network_lal, network_lal)          
-      
-        #info(_LOGGER, "$(cont.label) violations $(vio)")
-        #if vio.vm > vm_threshold || vio.pg > pg_threshold || vio.qg > qg_threshold || vio.sm > sm_threshold || vio.smdc > sm_threshold || vio.cmac > sm_threshold || vio.cmdc > sm_threshold
-        if vio.sm > sm_threshold || vio.smdc > sm_threshold 
-            Memento.info(_LOGGER, "adding contingency $(cont.label) due to constraint violations $(vio)")            
-            push!(convdc_cuts, cont)
-            convdc_cut_vio = vio.pg + vio.qg + vio.sm + vio.smdc + vio.cmac + vio.cmdc
-        else
-            convdc_cut_vio = 0.0
-        end
-
-        cont_convdc["status"] = 1
     end
 
    if model_type <: _PM.DCPPowerModel
@@ -263,8 +273,8 @@ end
 
 
 "ranks branchdc contingencies and down selects based on evaluation limits"
-function calc_branchdc_contingency_subset(network::Dict{String,<:Any}; branchdc_eval_limit=length(network["branchdc_contingencies"]))        
-    line_imp_mag = Dict(branchdc["index"] => branchdc["rateA"]*(branchdc["r"]) for (i,branchdc) in network["branchdc"])                       
+function calc_branchdc_contingency_subset(network::Dict{String,<:Any}; branchdc_eval_limit=length(network["branchdc_contingencies"]))
+    line_imp_mag = Dict(branchdc["index"] => branchdc["rateA"]*(branchdc["r"]) for (i,branchdc) in network["branchdc"])
     branchdc_contingencies =sort(network["branchdc_contingencies"], rev=true, by=x -> line_imp_mag[x.idx])                                     
 
     branchdc_cont_limit = min(branchdc_eval_limit, length(network["branchdc_contingencies"]))                                                    

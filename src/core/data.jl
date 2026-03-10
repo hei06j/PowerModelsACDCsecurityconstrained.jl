@@ -155,9 +155,11 @@ end
 
 
 function update_data_converter_setpoints!(data, solution)
-    for (i,conv) in data["convdc"]
-        conv["P_g"] = -solution["convdc"][i]["pgrid"]
-        conv["Q_g"] = -solution["convdc"][i]["qgrid"]
+    if haskey(data, "convdc")
+        for (i,conv) in data["convdc"]
+            conv["P_g"] = -solution["convdc"][i]["pgrid"]
+            conv["Q_g"] = -solution["convdc"][i]["qgrid"]
+        end
     end
     return data
 end
@@ -1928,6 +1930,38 @@ function fix_scopf_data_case5_acdc!(data)
 
     for i=1:length(data["convdc"])
         data["convdc"]["$i"]["ep"] = 1e-1
+    end
+
+    data["gen"]["1"]["alpha"] = 15.92 
+    data["gen"]["2"]["alpha"] = 11.09 
+
+    for i=1:length(data["branch"])
+        data["branch"]["$i"]["tm_min"] = 0.9
+        data["branch"]["$i"]["tm_max"] = 1.1
+        data["branch"]["$i"]["ta_min"] = -15
+        data["branch"]["$i"]["ta_max"] = 15
+    end
+    return data
+end
+
+
+function fix_scopf_data_case5!(data)
+
+    idx_ac = [contingency["branch_id1"] for (i, contingency) in data["contingencies"]]
+    idx_gen = [contingency["gen_id1"] for (i, contingency) in data["contingencies"]]
+    labels = [contingency["source_id"][2] for (i, contingency) in data["contingencies"]]
+
+    data["branch_contingencies"] = [(idx = id, label = string(labels[i]), type = "branch") for (i,id) in enumerate(idx_ac) if id != 0]
+    data["gen_contingencies"] = [(idx = id, label = string(labels[i]), type = "gen") for (i,id) in enumerate(idx_gen) if id != 0]
+
+
+    data["area_gens"] = Dict{Int64, Set{Int64}}()
+    data["area_gens"][1] = Set([2, 1])
+
+    data["contingencies"] = []  # This to empty the existing contingencies in the data
+
+    for i=1:length(data["gen"])
+        data["gen"]["$i"]["ep"] = 1e-1
     end
 
     data["gen"]["1"]["alpha"] = 15.92 

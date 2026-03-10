@@ -6,7 +6,7 @@ violated contingencies in integrated ACDC grid.
 
 function run_scopf(data, model_constructor, solver; kwargs...)
     # _PMACDC.process_additional_data!(data)
-    return _PM.solve_model(data, model_constructor, solver, build_scopf; ref_extensions = [_PM.ref_add_on_off_va_bounds!, _PMACDC.add_ref_dcgrid!, _PMACDC.ref_add_pst!, _PMACDC.ref_add_sssc!,_PMSC.ref_c1!], multinetwork=true, kwargs...)
+    return _PM.solve_model(data, model_constructor, solver, build_scopf; ref_extensions = [_PM.ref_add_on_off_va_bounds!, _PMACDC.add_ref_dcgrid!,_PMSC.ref_c1!], multinetwork=true, kwargs...)
 end
 
 
@@ -104,6 +104,63 @@ function constraint_power_balance_dc(pm::_PM.AbstractPowerModel, n::Int, i::Int,
     end
 end
 
+function constraint_converter_current(pm::_PM.AbstractPowerModel, i::Int; nw::Int=_PM.nw_id_default)
+    conv = _PM.ref(pm, nw, :convdc, i)
+    Vmax = conv["Vmmax"]
+    Imax = conv["Imax"]
+    constraint_converter_current(pm, nw, i, Vmax, Imax)
+end
+
+function constraint_converter_current(pm::_PM.AbstractACPModel, n::Int, i::Int, Umax, Imax)
+    vmc = _PM.var(pm, n, :vmc, i)
+    pconv_ac = _PM.var(pm, n, :pconv_ac, i)
+    qconv_ac = _PM.var(pm, n, :qconv_ac, i)
+    iconv = _PM.var(pm, n, :iconv_ac, i)
+
+    JuMP.@NLconstraint(pm.model, pconv_ac^2 + qconv_ac^2 == vmc^2 * iconv^2)
+end
+
+function constraint_conv_transformer(pm::_PM.AbstractPowerModel, i::Int; nw::Int=_PM.nw_id_default)
+    conv = _PM.ref(pm, nw, :convdc, i)
+    constraint_conv_transformer(pm, nw, i, conv["rtf"], conv["xtf"], conv["busac_i"], conv["tm"], Bool(conv["transformer"]))
+end
+
+
+function constraint_conv_transformer(pm::_PM.AbstractACPModel, n::Int, i::Int, rtf, xtf, acbus, tm, transformer)
+    ptf_fr = _PM.var(pm, n, :pconv_tf_fr, i)
+    qtf_fr = _PM.var(pm, n, :qconv_tf_fr, i)
+    ptf_to = _PM.var(pm, n, :pconv_tf_to, i)
+    qtf_to = _PM.var(pm, n, :qconv_tf_to, i)
+
+    vm = _PM.var(pm, n, :vm, acbus)
+    va = _PM.var(pm, n, :va, acbus)
+    vmf = _PM.var(pm, n, :vmf, i)
+    vaf = _PM.var(pm, n, :vaf, i)
+
+    ztf = rtf + im*xtf
+    if transformer
+        ytf = 1/(rtf + im*xtf)
+        gtf = real(ytf)
+        btf = imag(ytf)
+        gtf_sh = 0
+        c1, c2, c3, c4 = ac_power_flow_constraints(pm.model, gtf, btf, gtf_sh, vm, vmf, va, vaf, ptf_fr, ptf_to, qtf_fr, qtf_to, tm)
+    else
+        JuMP.@constraint(pm.model, ptf_fr + ptf_to == 0)
+        JuMP.@constraint(pm.model, qtf_fr + qtf_to == 0)
+        JuMP.@constraint(pm.model, va == vaf)
+        JuMP.@constraint(pm.model, vm == vmf)
+    end
+end
+
+function ac_power_flow_constraints(model, g, b, gsh_fr, vm_fr, vm_to, va_fr, va_to, p_fr, p_to, q_fr, q_to, tm)
+    c1 = JuMP.@NLconstraint(model, p_fr ==  g/(tm^2)*vm_fr^2 + -g/(tm)*vm_fr*vm_to * cos(va_fr-va_to) + -b/(tm)*vm_fr*vm_to*sin(va_fr-va_to))
+    c2 = JuMP.@NLconstraint(model, q_fr == -b/(tm^2)*vm_fr^2 +  b/(tm)*vm_fr*vm_to * cos(va_fr-va_to) + -g/(tm)*vm_fr*vm_to*sin(va_fr-va_to))
+    c3 = JuMP.@NLconstraint(model, p_to ==  g*vm_to^2 + -g/(tm)*vm_to*vm_fr  *    cos(va_to - va_fr)     + -b/(tm)*vm_to*vm_fr    *sin(va_to - va_fr))
+    c4 = JuMP.@NLconstraint(model, q_to == -b*vm_to^2 +  b/(tm)*vm_to*vm_fr  *    cos(va_to - va_fr)     + -g/(tm)*vm_to*vm_fr    *sin(va_to - va_fr))
+    return c1, c2, c3, c4
+end
+
+
 function build_scopf(pm::_PM.AbstractPowerModel)
     
     _PM.variable_bus_voltage(pm, nw=0)
@@ -151,6 +208,8 @@ function build_scopf(pm::_PM.AbstractPowerModel)
         _PMACDC.constraint_converter_losses(pm, i, nw=0)
         # _PMACDC.constraint_converter_current(pm, i, nw=0)
         # _PMACDC.constraint_conv_transformer(pm, i, nw=0)
+        constraint_converter_current(pm, i, nw=0)
+        constraint_conv_transformer(pm, i, nw=0)
         _PMACDC.constraint_conv_reactor(pm, i, nw=0)
         _PMACDC.constraint_conv_filter(pm, i, nw=0)
         if pm.ref[:it][:pm][:nw][_PM.nw_id_default][:convdc][i]["islcc"] == 1

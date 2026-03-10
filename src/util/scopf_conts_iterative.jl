@@ -3,7 +3,7 @@ Solves an SCOPF problem for integrated HVAC and HVDC grid by iteratively checkin
 violated contingencies and resolving until a fixed-point is reached.
 
 """ 
-function run_scopf_acdc_contingencies(network::Dict{String,<:Any}, model_type_scopf::Type, model_type_filter::Type, run_scopf_prob::Function, optimizer_scopf, optimizer_filter, setting; ::Int=100, time_limit::Float64=Inf)   
+function run_scopf_acdc_contingencies(network::Dict{String,<:Any}, model_type_scopf::Type, model_type_filter::Type, run_scopf_prob::Function, optimizer_scopf, optimizer_filter, setting; max_iter::Int=100, time_limit::Float64=Inf)   
     if _IM.ismultinetwork(network)
         Memento.error(_LOGGER, "run_scopf_acdc_contingencies can only be used on single networks")
     end

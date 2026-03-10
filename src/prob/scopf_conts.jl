@@ -125,7 +125,6 @@ function constraint_conv_transformer(pm::_PM.AbstractPowerModel, i::Int; nw::Int
     constraint_conv_transformer(pm, nw, i, conv["rtf"], conv["xtf"], conv["busac_i"], conv["tm"], Bool(conv["transformer"]))
 end
 
-
 function constraint_conv_transformer(pm::_PM.AbstractACPModel, n::Int, i::Int, rtf, xtf, acbus, tm, transformer)
     ptf_fr = _PM.var(pm, n, :pconv_tf_fr, i)
     qtf_fr = _PM.var(pm, n, :qconv_tf_fr, i)
@@ -158,6 +157,42 @@ function ac_power_flow_constraints(model, g, b, gsh_fr, vm_fr, vm_to, va_fr, va_
     c3 = JuMP.@NLconstraint(model, p_to ==  g*vm_to^2 + -g/(tm)*vm_to*vm_fr  *    cos(va_to - va_fr)     + -b/(tm)*vm_to*vm_fr    *sin(va_to - va_fr))
     c4 = JuMP.@NLconstraint(model, q_to == -b*vm_to^2 +  b/(tm)*vm_to*vm_fr  *    cos(va_to - va_fr)     + -g/(tm)*vm_to*vm_fr    *sin(va_to - va_fr))
     return c1, c2, c3, c4
+end
+
+
+function constraint_conv_reactor(pm::_PM.AbstractPowerModel, i::Int; nw::Int=_PM.nw_id_default)
+    conv = _PM.ref(pm, nw, :convdc, i)
+    constraint_conv_reactor(pm, nw, i, conv["rc"], conv["xc"], Bool(conv["reactor"]))
+end
+
+function constraint_conv_reactor(pm::_PM.AbstractACPModel, n::Int, i::Int, rc, xc, reactor)
+    pconv_ac = _PM.var(pm, n,  :pconv_ac, i)
+    qconv_ac = _PM.var(pm, n,  :qconv_ac, i)
+    ppr_to = - pconv_ac
+    qpr_to = - qconv_ac
+    ppr_fr = _PM.var(pm, n,  :pconv_pr_fr, i)
+    qpr_fr = _PM.var(pm, n,  :qconv_pr_fr, i)
+
+    vmf = _PM.var(pm, n, :vmf, i)
+    vaf = _PM.var(pm, n, :vaf, i)
+    vmc = _PM.var(pm, n, :vmc, i)
+    vac = _PM.var(pm, n, :vac, i)
+
+    zc = rc + im*xc
+    if reactor
+        yc = 1/(zc)
+        gc = real(yc)
+        bc = imag(yc)
+        JuMP.@NLconstraint(pm.model, - pconv_ac == gc*vmc^2 + -gc*vmc*vmf*cos(vac-vaf) + -bc*vmc*vmf*sin(vac-vaf)) # JuMP doesn't allow affine expressions in NL constraints
+        JuMP.@NLconstraint(pm.model, - qconv_ac ==-bc*vmc^2 +  bc*vmc*vmf*cos(vac-vaf) + -gc*vmc*vmf*sin(vac-vaf)) # JuMP doesn't allow affine expressions in NL constraints
+        JuMP.@NLconstraint(pm.model, ppr_fr ==  gc *vmf^2 + -gc *vmf*vmc*cos(vaf - vac) + -bc *vmf*vmc*sin(vaf - vac))
+        JuMP.@NLconstraint(pm.model, qpr_fr == -bc *vmf^2 +  bc *vmf*vmc*cos(vaf - vac) + -gc *vmf*vmc*sin(vaf - vac))
+    else
+        JuMP.@constraint(pm.model, ppr_fr + ppr_to == 0)
+        JuMP.@constraint(pm.model, qpr_fr + qpr_to == 0)
+        JuMP.@constraint(pm.model, vac == vaf)
+        JuMP.@constraint(pm.model, vmc == vmf)
+    end
 end
 
 
@@ -208,9 +243,10 @@ function build_scopf(pm::_PM.AbstractPowerModel)
         _PMACDC.constraint_converter_losses(pm, i, nw=0)
         # _PMACDC.constraint_converter_current(pm, i, nw=0)
         # _PMACDC.constraint_conv_transformer(pm, i, nw=0)
+        # _PMACDC.constraint_conv_reactor(pm, i, nw=0)
         constraint_converter_current(pm, i, nw=0)
         constraint_conv_transformer(pm, i, nw=0)
-        _PMACDC.constraint_conv_reactor(pm, i, nw=0)
+        constraint_conv_reactor(pm, i, nw=0)
         _PMACDC.constraint_conv_filter(pm, i, nw=0)
         if pm.ref[:it][:pm][:nw][_PM.nw_id_default][:convdc][i]["islcc"] == 1
             _PMACDC.constraint_conv_firing_angle(pm, i, nw=0)
@@ -243,7 +279,8 @@ function build_scopf(pm::_PM.AbstractPowerModel)
 
         gen_buses = _PM.ref(pm, :gen_buses, nw=nw)
         for i in _PM.ids(pm, :bus, nw=nw)
-            _PMACDC.constraint_power_balance_ac(pm, i, nw=nw)
+            # _PMACDC.constraint_power_balance_ac(pm, i, nw=nw)
+            constraint_power_balance_ac(pm, i, nw=nw)
 
             # if a bus has active generators, fix the voltage magnitude to the base case
             if i in gen_buses
@@ -272,16 +309,20 @@ function build_scopf(pm::_PM.AbstractPowerModel)
         end
 
         for i in _PM.ids(pm, nw=nw, :busdc)                        
-            _PMACDC.constraint_power_balance_dc(pm, i, nw=nw)
+            # _PMACDC.constraint_power_balance_dc(pm, i, nw=nw)
+            constraint_power_balance_dc(pm, i, nw=nw)
         end                                          
         for i in _PM.ids(pm, nw=nw, :branchdc)
             _PMACDC.constraint_ohms_dc_branch(pm, i, nw=nw)
         end                                          
         for i in _PM.ids(pm, nw=nw, :convdc)          
             _PMACDC.constraint_converter_losses(pm, i, nw=nw)
-            _PMACDC.constraint_converter_current(pm, i, nw=nw)
-            _PMACDC.constraint_conv_transformer(pm, i, nw=nw)
-            _PMACDC.constraint_conv_reactor(pm, i, nw=nw)
+            # _PMACDC.constraint_converter_current(pm, i, nw=nw)
+            # _PMACDC.constraint_conv_transformer(pm, i, nw=nw)
+            # _PMACDC.constraint_conv_reactor(pm, i, nw=nw)
+            constraint_converter_current(pm, i, nw=nw)
+            constraint_conv_transformer(pm, i, nw=nw)
+            constraint_conv_reactor(pm, i, nw=nw)
             _PMACDC.constraint_conv_filter(pm, i, nw=nw)
             if pm.ref[:it][:pm][:nw][nw][:convdc][i]["islcc"] == 1
                 _PMACDC.constraint_conv_firing_angle(pm, i, nw=nw)
@@ -356,8 +397,10 @@ function build_scopf_soft(pm::_PM.AbstractPowerModel)
 
     for i in _PM.ids(pm, nw=0, :convdc)                                                
         _PMACDC.constraint_converter_losses(pm, i, nw=0)                                                            
-        _PMACDC.constraint_conv_transformer(pm, i, nw=0)                               
-        _PMACDC.constraint_conv_reactor(pm, i, nw=0)                                 
+        # _PMACDC.constraint_conv_transformer(pm, i, nw=0)                               
+        # _PMACDC.constraint_conv_reactor(pm, i, nw=0)        
+        constraint_conv_transformer(pm, i, nw=0)                               
+        constraint_conv_reactor(pm, i, nw=0)                         
         _PMACDC.constraint_conv_filter(pm, i, nw=0)
         constraint_converter_current(pm, i, nw=0)                                     
         if pm.ref[:it][:pm][:nw][_PM.nw_id_default][:convdc][i]["islcc"] == 1                
@@ -430,8 +473,10 @@ function build_scopf_soft(pm::_PM.AbstractPowerModel)
         for i in _PM.ids(pm, nw=nw, :convdc)                                               
             _PMACDC.constraint_converter_losses(pm, i, nw=nw)                              
             constraint_converter_current(pm, i, nw=nw)                             
-            _PMACDC.constraint_conv_transformer(pm, i, nw=nw)                              
-            _PMACDC.constraint_conv_reactor(pm, i, nw=nw)                                  
+            # _PMACDC.constraint_conv_transformer(pm, i, nw=nw)                              
+            # _PMACDC.constraint_conv_reactor(pm, i, nw=nw)     
+            constraint_conv_transformer(pm, i, nw=nw)
+            constraint_conv_reactor(pm, i, nw=nw)                             
             _PMACDC.constraint_conv_filter(pm, i, nw=nw)                                   
             if pm.ref[:it][:pm][:nw][nw][:convdc][i]["islcc"] == 1            
                 _PMACDC.constraint_conv_firing_angle(pm, i, nw=nw)                                    

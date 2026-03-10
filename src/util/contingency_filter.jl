@@ -46,7 +46,7 @@ function check_acdc_contingency_violations(network, model_type, optimizer, setti
         convdc_contingencies = calc_convdc_contingency_subset(network_lal, convdc_eval_limit=convdc_eval_limit)
     end
 
-   total_cuts_pre_filter = []
+    total_cuts_pre_filter = []
     gen_cuts = []
     gen_cut_vio = 0.0
     for (i,cont) in enumerate(gen_contingencies)
@@ -104,10 +104,16 @@ function check_acdc_contingency_violations(network, model_type, optimizer, setti
         end
 
         try
-            solution =  _PMACDC.run_acdcpf( network_lal, model_type, optimizer, setting = setting)["solution"]
-            _PM.update_data!(network_lal, solution) 
+            # solution =  _PMACDC.run_acdcpf( network_lal, model_type, optimizer, setting = setting)["solution"]
+            result = solve_acdcpf(network_lal, model_type, optimizer, setting = setting)
+            if result["termination_status"] != _PM.LOCALLY_SOLVED && result["termination_status"] != _PM.OPTIMAL && result["termination_status"] != _PM.ALMOST_LOCALLY_SOLVED
+                Memento.warn(_LOGGER, "acdcpf solve did not terminate optimally on $(cont.label) with status $(result["termination_status"])")  
+                continue   
+            end
+            solution = result["solution"]
+            _PM.update_data!(network_lal, solution)
         catch exception
-            Memento.warn(_LOGGER, "acdcpf solve failed on $(cont.label)")    
+            Memento.warn(_LOGGER, "acdcpf solve failed on $(cont.label) with error \n $exception")    
             continue
         end
 
@@ -146,10 +152,16 @@ function check_acdc_contingency_violations(network, model_type, optimizer, setti
         cont_branch["br_status"] = 0
         _PMACDC.fix_data!(network_lal)
         try
-            solution = _PMACDC.run_acdcpf(network_lal, model_type, optimizer; setting = setting)["solution"]
+            # solution = _PMACDC.run_acdcpf(network_lal, model_type, optimizer; setting = setting)["solution"]
+            result = solve_acdcpf(network_lal, model_type, optimizer, setting = setting)
+            if result["termination_status"] != _PM.LOCALLY_SOLVED && result["termination_status"] != _PM.OPTIMAL && result["termination_status"] != _PM.ALMOST_LOCALLY_SOLVED
+                Memento.warn(_LOGGER, "acdcpf solve did not terminate optimally on $(cont.label) with status $(result["termination_status"])")  
+                continue   
+            end
+            solution = result["solution"]
             _PM.update_data!(network_lal, solution)
         catch exception
-            Memento.warn(_LOGGER, "acdcpf solve failed on $(cont.label)")
+            Memento.warn(_LOGGER, "acdcpf solve failed on $(cont.label) with error \n $exception")    
            continue
         end
         
@@ -189,10 +201,16 @@ function check_acdc_contingency_violations(network, model_type, optimizer, setti
             cont_branchdc["status"] = 0                                       
 
             try
-                solution = _PMACDC.run_acdcpf(network_lal, model_type, optimizer; setting = setting)["solution"]
+                # solution = _PMACDC.run_acdcpf(network_lal, model_type, optimizer; setting = setting)["solution"]
+                result = solve_acdcpf(network_lal, model_type, optimizer, setting = setting)
+                if result["termination_status"] != _PM.LOCALLY_SOLVED && result["termination_status"] != _PM.OPTIMAL && result["termination_status"] != _PM.ALMOST_LOCALLY_SOLVED
+                    Memento.warn(_LOGGER, "acdcpf solve did not terminate optimally on $(cont.label) with status $(result["termination_status"])")  
+                    continue   
+                end
+                solution = result["solution"]
                 _PM.update_data!(network_lal, solution)
             catch exception
-                Memento.warn(_LOGGER, "acdcpf solve failed on $(cont.label)")     
+                Memento.warn(_LOGGER, "acdcpf solve failed on $(cont.label) with error \n $exception")     
                 continue
             end
 
@@ -231,10 +249,16 @@ function check_acdc_contingency_violations(network, model_type, optimizer, setti
             cont_convdc["status"] = 0                                       
 
             try
-                solution = _PMACDC.run_acdcpf( network_lal, model_type, optimizer; setting = setting)["solution"]
+                # solution = _PMACDC.run_acdcpf( network_lal, model_type, optimizer; setting = setting)["solution"]
+                result = solve_acdcpf(network_lal, model_type, optimizer, setting = setting)
+                if result["termination_status"] != _PM.LOCALLY_SOLVED && result["termination_status"] != _PM.OPTIMAL && result["termination_status"] != _PM.ALMOST_LOCALLY_SOLVED
+                    Memento.warn(_LOGGER, "acdcpf solve did not terminate optimally on $(cont.label) with status $(result["termination_status"])")  
+                    continue   
+                end
+                solution = result["solution"]
                 _PM.update_data!(network_lal, solution)
             catch exception
-                Memento.warn(_LOGGER, "acdcpf solve failed on $(cont.label)")     
+                Memento.warn(_LOGGER, "acdcpf solve failed on $(cont.label) with error \n $exception")     
                 continue
             end
 

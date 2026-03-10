@@ -50,6 +50,14 @@ function run_scopf_acdc_contingencies(network::Dict{String,<:Any}, model_type_sc
         
         contingencies = check_acdc_contingency_violations(network_base, model_type_filter, optimizer_filter, setting, contingency_limit=iteration)
 
+        # network_lal = deepcopy(network_base)
+        # model_type = model_type_filter
+        # optimizer = optimizer_filter
+        # gen_contingency_limit=1000; branch_contingency_limit=5000; branchdc_contingency_limit=1000;
+        # convdc_contingency_limit=1000; contingency_limit=typemax(Int64);gen_eval_limit=typemax(Int64);
+        # branch_eval_limit=typemax(Int64); branchdc_eval_limit=typemax(Int64); convdc_eval_limit=typemax(Int64);
+        # sm_threshold=0.01; pg_threshold=0.01; qg_threshold=0.01;vm_threshold=0.01
+
         contingencies_found = 0
        
         for cont in contingencies.gen_contingencies

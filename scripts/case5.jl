@@ -31,6 +31,11 @@ _PMSCACDC.fix_scopf_data_case5!(data)
 _PMACDC.process_additional_data!(data)
 setting = Dict("output" => Dict("branch_flows" => true), "conv_losses_mp" => true) 
 
+data["gen"]["1"]["pg"] = 1
+data["gen"]["1"]["pmin"] = data["gen"]["1"]["pmax"] = data["gen"]["1"]["pg"]
+data["gen"]["2"]["pmin"] = data["gen"]["2"]["pmax"] = data["gen"]["2"]["pg"]
+
+
 _PMSCACDC.silence()
 
 result = _PMSCACDC.run_scopf_acdc_contingencies(data, _PM.ACPPowerModel, _PM.ACPPowerModel, _PMSCACDC.run_scopf, nlp_solver, nlp_solver, setting)
